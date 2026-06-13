@@ -222,13 +222,17 @@
 
   <dialog id="syncDlg">
     <div class="dlg">
-      <h2>자동 동기화</h2>
-      <p>같은 <b>동기화 주소</b>와 <b>비밀 코드</b>를 폰과 컴퓨터에 똑같이 넣으면, 적은 내용이 서로 자동으로 오갑니다. (설정은 동기화 서버를 먼저 만든 뒤 입력)</p>
-      <input id="syncUrl" placeholder="동기화 주소 (예: https://…workers.dev)" autocomplete="off">
-      <input id="syncKey" placeholder="비밀 코드 (양쪽 기기에 동일하게)" autocomplete="off">
+      <h2>동기화 <span style="font-size:11px;color:var(--text-dim);font-weight:400">v3</span></h2>
+      <p>양쪽 기기에 <b>같은 비밀 코드</b>를 넣으세요. 그 다음 <b>내용 있는 기기에서 “서버로 올리기”</b>, <b>받을 기기에서 “서버에서 받기”</b>를 누르면 확실하게 옮겨집니다.</p>
+      <input id="syncKey" placeholder="비밀 코드 (양쪽 기기에 똑같이)" autocomplete="off">
+      <input id="syncUrl" placeholder="동기화 주소" autocomplete="off">
       <div class="btns">
+        <button class="primary" id="forcePush">↑ 서버로 올리기</button>
+        <button class="primary" id="forcePull">↓ 서버에서 받기</button>
+      </div>
+      <div class="btns">
+        <button class="ghost" id="syncSave">자동 동기화 켜기</button>
         <button class="ghost" id="syncOff">끄기</button>
-        <button class="primary" id="syncSave">저장하고 켜기</button>
       </div>
     </div>
   </dialog>
@@ -525,18 +529,46 @@
   }
 
   syncDot.onclick = function () {
-    document.getElementById("syncUrl").value = sync.url || "";
+    document.getElementById("syncUrl").value = sync.url || DEFAULT_SYNC_URL;
     document.getElementById("syncKey").value = sync.key || "";
     syncDlg.showModal();
   };
-  document.getElementById("syncSave").onclick = function () {
-    sync.url = document.getElementById("syncUrl").value.trim().replace(/\/$/, "");
+  function applyFields() {
+    sync.url = (document.getElementById("syncUrl").value.trim() || DEFAULT_SYNC_URL).replace(/\/$/, "");
     sync.key = document.getElementById("syncKey").value.trim();
-    saveSync(); refreshDot(); syncDlg.close();
+    saveSync(); refreshDot();
+  }
+  document.getElementById("syncSave").onclick = function () {
+    applyFields(); syncDlg.close();
     if (syncOn()) pullSync({ announce: true });
   };
   document.getElementById("syncOff").onclick = function () {
-    sync = {}; saveSync(); refreshDot(); syncDlg.close();
+    sync = { url: DEFAULT_SYNC_URL }; saveSync(); refreshDot(); syncDlg.close();
+  };
+  document.getElementById("forcePush").onclick = function () {
+    applyFields();
+    if (!syncOn()) { showToast("비밀 코드를 먼저 입력하세요", true); return; }
+    state.updated = Date.now();
+    localStorage.setItem(KEY, JSON.stringify(state));
+    fetch(sync.url, { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: sync.key, rev: state.updated, data: state }) })
+      .then(function (r) { return r.json(); })
+      .then(function (res) { showToast(res && res.ok ? "서버로 올렸어요 ✅" : "올리기 실패", true); syncDlg.close(); })
+      .catch(function () { showToast("서버 연결 실패", true); });
+  };
+  document.getElementById("forcePull").onclick = function () {
+    applyFields();
+    if (!syncOn()) { showToast("비밀 코드를 먼저 입력하세요", true); return; }
+    fetch(sync.url + "?key=" + encodeURIComponent(sync.key), { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (remote) {
+        if (remote && remote.data && remote.data.items) {
+          state = remote.data; items = state.items || [];
+          localStorage.setItem(KEY, JSON.stringify(state));
+          render(); showToast("서버에서 " + items.length + "개 받아왔어요 ✨", true); syncDlg.close();
+        } else { showToast("서버에 올라온 내역이 없어요", true); }
+      })
+      .catch(function () { showToast("서버 연결 실패", true); });
   };
 
   /* ---------- 시작 ---------- */
