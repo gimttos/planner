@@ -275,7 +275,7 @@
   }
 
   function save(bump) {
-    if (bump !== false) state.rev = (state.rev || 0) + 1;
+    if (bump !== false) { state.rev = (state.rev || 0) + 1; state.updated = Date.now(); }
     state.items = items;
     localStorage.setItem(KEY, JSON.stringify(state));
     if (bump !== false) pushSync();
@@ -488,6 +488,8 @@
   function syncOn() { return sync.url && sync.key; }
   function refreshDot() { syncDot.className = syncOn() ? "on" : ""; syncDot.textContent = (syncOn() ? "● " : "○ ") + "동기화"; }
 
+  function ver() { return state.updated || state.rev || 0; }
+
   var pushTimer = null;
   function pushSync() {
     if (!syncOn()) return;
@@ -496,21 +498,30 @@
       fetch(sync.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: sync.key, rev: state.rev, data: state })
+        body: JSON.stringify({ key: sync.key, rev: ver(), data: state })
       }).catch(function () {});
     }, 600);
   }
-  function pullSync() {
+  function pullSync(opts) {
+    opts = opts || {};
     if (!syncOn()) return;
-    fetch(sync.url + "?key=" + encodeURIComponent(sync.key))
+    fetch(sync.url + "?key=" + encodeURIComponent(sync.key), { cache: "no-store" })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (remote) {
-        if (remote && remote.data && (remote.rev || 0) > (state.rev || 0)) {
+        var loaded = false;
+        if (remote && remote.data && (remote.rev || 0) > ver()) {
           state = remote.data; items = state.items || [];
           localStorage.setItem(KEY, JSON.stringify(state));
           render();
+          loaded = true;
+          if (opts.announce) showToast("내역 불러왔어요 ✨", true);
         }
-      }).catch(function () {});
+        if (!loaded && opts.announce) {
+          if (items.length) { pushSync(); showToast("이 기기 내용을 올렸어요", true); }
+          else showToast("동기화 켰어요 (받아올 내역 없음)", true);
+        }
+      })
+      .catch(function () { if (opts.announce) showToast("서버 연결 실패 — 주소 확인", true); });
   }
 
   syncDot.onclick = function () {
@@ -522,7 +533,7 @@
     sync.url = document.getElementById("syncUrl").value.trim().replace(/\/$/, "");
     sync.key = document.getElementById("syncKey").value.trim();
     saveSync(); refreshDot(); syncDlg.close();
-    if (syncOn()) { pullSync(); pushSync(); showToast("동기화 켰어요", true); }
+    if (syncOn()) pullSync({ announce: true });
   };
   document.getElementById("syncOff").onclick = function () {
     sync = {}; saveSync(); refreshDot(); syncDlg.close();
